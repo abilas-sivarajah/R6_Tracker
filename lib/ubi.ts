@@ -159,6 +159,28 @@ async function postSession(authHeader: string): Promise<SessionResponse> {
   return data;
 }
 
+// Self-imposed login cooldown: when Ubisoft replies "Too many calls per IP",
+// stop attempting logins for a while so repeated requests don't extend the ban.
+const COOLDOWN_FILE = path.join(os.tmpdir(), 'r6-tracker-cooldown.json');
+const COOLDOWN_MS = Number(process.env.R6_LOGIN_COOLDOWN_MS ?? 20 * 60 * 1000);
+
+async function getCooldownUntil(): Promise<number> {
+  try {
+    const raw = await fs.readFile(COOLDOWN_FILE, 'utf8');
+    return (JSON.parse(raw) as { until?: number }).until ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function setCooldown(until: number): Promise<void> {
+  try {
+    await fs.writeFile(COOLDOWN_FILE, JSON.stringify({ until }), 'utf8');
+  } catch {
+    /* best-effort */
+  }
+}
+
 let inflight: Promise<Tickets> | null = null;
 
 function getTickets(): Promise<Tickets> {
@@ -181,6 +203,16 @@ async function resolveTickets(now: number): Promise<Tickets> {
     return tickets;
   }
 
+  // Respect a self-imposed cooldown after a rate-limit response.
+  const cooldownUntil = await getCooldownUntil();
+  if (cooldownUntil > now) {
+    const mins = Math.ceil((cooldownUntil - now) / 60000);
+    throw new Error(
+      `Login pausiert wegen Ubisoft-Rate-Limit ("Too many calls per IP"). ` +
+        `Bitte noch ca. ${mins} Min warten (kein erneuter Versuch nötig).`,
+    );
+  }
+
   const email = process.env.UBI_EMAIL;
   const password = process.env.UBI_PASSWORD;
   if (!email || !password) {
@@ -189,8 +221,19 @@ async function resolveTickets(now: number): Promise<Tickets> {
 
   const basic =
     'Basic ' + Buffer.from(`${email}:${password}`, 'utf8').toString('base64');
-  const first = await postSession(basic);
-  const second = await postSession(`Ubi_v1 t=${first.ticket}`);
+
+  let first: SessionResponse;
+  let second: SessionResponse;
+  try {
+    first = await postSession(basic);
+    second = await postSession(`Ubi_v1 t=${first.ticket}`);
+  } catch (err) {
+    // On a rate-limit, start the cooldown so we stop hammering the endpoint.
+    if (err instanceof Error && /too many calls/i.test(err.message)) {
+      await setCooldown(Date.now() + COOLDOWN_MS);
+    }
+    throw err;
+  }
 
   tickets = {
     key: first.ticket!,
