@@ -22,6 +22,68 @@ const HISTORY_MAX_SEASON = Number(process.env.R6_HISTORY_MAX_SEASON ?? 60);
 
 type R6APICtor = typeof R6APIClass;
 
+// Ubisoft's edge (Cloudflare) rejects requests with the default node-fetch
+// User-Agent with a non-JSON "403 Forbidden". r6api.js uses node-fetch v2
+// internally and sends no User-Agent, so we patch its node-fetch instance to
+// inject a browser-like UA on every request before the library is loaded.
+const BROWSER_UA =
+  process.env.R6_USER_AGENT ??
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
+let httpPatched = false;
+
+type RequestModule = {
+  request: ((...args: unknown[]) => unknown) & { __r6uaPatched?: boolean };
+};
+
+function overwriteUserAgent(args: unknown[]): void {
+  for (const arg of args) {
+    if (
+      arg &&
+      typeof arg === 'object' &&
+      'headers' in arg &&
+      (arg as { headers?: unknown }).headers &&
+      typeof (arg as { headers: unknown }).headers === 'object'
+    ) {
+      const headers = (arg as { headers: Record<string, unknown> }).headers;
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === 'user-agent') delete headers[key];
+      }
+      headers['User-Agent'] = BROWSER_UA;
+    }
+  }
+}
+
+/**
+ * node-fetch (used by r6api.js) sends its own "node-fetch/..." User-Agent,
+ * which Ubisoft's Cloudflare edge rejects with a non-JSON 403. node-fetch v2
+ * reads `https.request` from the builtin module at call time, so we wrap
+ * http(s).request on the builtin modules to force a browser-like User-Agent.
+ */
+async function patchHttpUserAgent(): Promise<void> {
+  if (httpPatched) return;
+  try {
+    const httpsNs = await import(/* turbopackIgnore: true */ 'node:https');
+    const httpNs = await import(/* turbopackIgnore: true */ 'node:http');
+    const mods = [httpsNs.default, httpNs.default] as RequestModule[];
+    for (const mod of mods) {
+      const orig = mod.request;
+      if (!orig || orig.__r6uaPatched) continue;
+      const wrapped = function (this: unknown, ...args: unknown[]) {
+        overwriteUserAgent(args);
+        return orig.apply(this, args);
+      } as RequestModule['request'];
+      wrapped.__r6uaPatched = true;
+      mod.request = wrapped;
+    }
+    httpPatched = true;
+  } catch (err) {
+    // Non-fatal: if patching fails we still try the request as-is.
+    console.error('[r6-tracker] could not patch http User-Agent:', err);
+  }
+}
+
 let api: InstanceType<R6APICtor> | null = null;
 
 /**
@@ -44,6 +106,8 @@ async function getApi(): Promise<InstanceType<R6APICtor>> {
       'Missing Ubisoft credentials. Set UBI_EMAIL and UBI_PASSWORD in .env.local',
     );
   }
+
+  await patchHttpUserAgent();
 
   const mod = (await import(
     /* webpackIgnore: true */ /* turbopackIgnore: true */ 'r6api.js'
