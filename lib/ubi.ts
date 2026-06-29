@@ -7,6 +7,10 @@
 // A browser User-Agent + a `datadome` cookie (R6_DATADOME) are sent on every
 // request to get past Ubisoft's DataDome anti-bot.
 
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import type { BoardStats, Platform, RankInfo } from './types';
 
 const APP_ID = process.env.R6_UBI_APPID ?? 'e3d5ea9e-50bd-43b7-88bf-39794f4e3d40';
@@ -79,6 +83,31 @@ interface Tickets {
 
 let tickets: Tickets | null = null;
 
+// Persist tickets to disk so we don't re-login on every request or restart
+// (Ubisoft rate-limits logins per IP: "Too many calls per IP address").
+const TICKETS_FILE = path.join(os.tmpdir(), 'r6-tracker-tickets.json');
+
+async function loadTicketsFromDisk(): Promise<Tickets | null> {
+  try {
+    const raw = await fs.readFile(TICKETS_FILE, 'utf8');
+    return JSON.parse(raw) as Tickets;
+  } catch {
+    return null;
+  }
+}
+
+async function saveTicketsToDisk(t: Tickets): Promise<void> {
+  try {
+    await fs.writeFile(TICKETS_FILE, JSON.stringify(t), 'utf8');
+  } catch {
+    /* best-effort cache */
+  }
+}
+
+function isValid(t: Tickets | null, now: number): t is Tickets {
+  return !!t && t.keyExp > now && t.newKeyExp > now;
+}
+
 function dataDomeCookie(): string | null {
   const raw = process.env.R6_DATADOME?.trim();
   if (!raw) return null;
@@ -130,9 +159,27 @@ async function postSession(authHeader: string): Promise<SessionResponse> {
   return data;
 }
 
-async function getTickets(): Promise<Tickets> {
+let inflight: Promise<Tickets> | null = null;
+
+function getTickets(): Promise<Tickets> {
   const now = Date.now();
-  if (tickets && tickets.keyExp > now && tickets.newKeyExp > now) return tickets;
+  if (isValid(tickets, now)) return Promise.resolve(tickets);
+  // De-duplicate concurrent logins so we never double-hit the rate-limited
+  // login endpoint.
+  if (inflight) return inflight;
+  inflight = resolveTickets(now).finally(() => {
+    inflight = null;
+  });
+  return inflight;
+}
+
+async function resolveTickets(now: number): Promise<Tickets> {
+  // on-disk cache (survives restarts / dev hot-reloads)
+  const onDisk = await loadTicketsFromDisk();
+  if (isValid(onDisk, now)) {
+    tickets = onDisk;
+    return tickets;
+  }
 
   const email = process.env.UBI_EMAIL;
   const password = process.env.UBI_PASSWORD;
@@ -152,6 +199,7 @@ async function getTickets(): Promise<Tickets> {
     keyExp: first.expiration ? Date.parse(first.expiration) : now + 2 * 3600 * 1000,
     newKeyExp: second.expiration ? Date.parse(second.expiration) : now + 2 * 3600 * 1000,
   };
+  await saveTicketsToDisk(tickets);
   return tickets;
 }
 
@@ -177,7 +225,9 @@ async function ubiGet<T>(url: string, useNew = false): Promise<T> {
   if (data && typeof data === 'object' && 'httpCode' in data) {
     const d = data as { httpCode: number; message?: string };
     if (d.httpCode === 401) {
-      tickets = null; // force re-login next call
+      // Ticket no longer valid — drop the cached one so we re-login next time.
+      tickets = null;
+      await fs.rm(TICKETS_FILE, { force: true }).catch(() => {});
     }
     throw new Error(`HTTP ${d.httpCode}: ${d.message ?? 'request failed'}`);
   }
