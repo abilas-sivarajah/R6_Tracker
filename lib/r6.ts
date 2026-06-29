@@ -1,6 +1,6 @@
 import os from 'node:os';
-import path from 'node:path';
-import R6API from 'r6api.js';
+
+import type R6APIClass from 'r6api.js';
 
 import type {
   BoardStats,
@@ -20,10 +20,21 @@ import type {
 const HISTORY_MIN_SEASON = Number(process.env.R6_HISTORY_MIN_SEASON ?? 16);
 const HISTORY_MAX_SEASON = Number(process.env.R6_HISTORY_MAX_SEASON ?? 60);
 
-let api: InstanceType<typeof R6API> | null = null;
+type R6APICtor = typeof R6APIClass;
 
-/** Lazily build a single, reused R6API client. */
-function getApi(): InstanceType<typeof R6API> {
+let api: InstanceType<R6APICtor> | null = null;
+
+/**
+ * Lazily build a single, reused R6API client.
+ *
+ * r6api.js is a CJS/ESM hybrid. Next's bundler (Turbopack) mangles both the
+ * static `import` and any wrapped `require` of it — the module resolves to
+ * undefined or an empty stub at runtime. The reliable fix is a *native*
+ * dynamic import, kept untouched by the bundler via the `turbopackIgnore`
+ * (and `webpackIgnore`) magic comments, which loads the real ESM entry whose
+ * default export is the R6API class.
+ */
+async function getApi(): Promise<InstanceType<R6APICtor>> {
   if (api) return api;
 
   const email = process.env.UBI_EMAIL;
@@ -34,13 +45,18 @@ function getApi(): InstanceType<typeof R6API> {
     );
   }
 
+  const mod = (await import(
+    /* webpackIgnore: true */ /* turbopackIgnore: true */ 'r6api.js'
+  )) as { default: R6APICtor };
+  const R6API = mod.default;
+
   api = new R6API({
     email,
     password,
     // Cache the auth ticket in a writable temp dir (avoids writing inside the
     // bundle / read-only deploy targets).
     authFileDirPath: os.tmpdir(),
-    authFileName: path.join('r6-tracker-auth.json'),
+    authFileName: 'r6-tracker-auth.json',
   });
 
   return api;
@@ -110,7 +126,7 @@ export async function getPlayerData(
   platform: Platform,
   username: string,
 ): Promise<PlayerData | null> {
-  const client = getApi();
+  const client = await getApi();
 
   const profiles = await client.findByUsername(platform, username);
   const profile = profiles[0];
