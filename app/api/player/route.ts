@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 
+import { getDemoPlayer } from '@/lib/demo';
 import { getPlayerData } from '@/lib/r6';
 import type { Platform } from '@/lib/types';
 
@@ -26,6 +27,11 @@ export async function GET(request: Request) {
       { error: `Ungültige Plattform: ${platform}` },
       { status: 400 },
     );
+  }
+
+  // Demo mode: serve mock data without Ubisoft credentials / network.
+  if (process.env.R6_DEMO === '1') {
+    return NextResponse.json(getDemoPlayer(platform, username));
   }
 
   try {

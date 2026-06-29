@@ -55,6 +55,20 @@ npm run dev
 | `UBI_PASSWORD`           | ja      | Passwort des Ubisoft-Accounts                            |
 | `R6_HISTORY_MIN_SEASON`  | nein    | Erste Saison-ID für den Rangverlauf (Standard `16`)     |
 | `R6_HISTORY_MAX_SEASON`  | nein    | Letzte Saison-ID für den Rangverlauf (Standard `60`)    |
+| `R6_DEMO`                | nein    | Auf `1` setzen, um Mock-Daten ohne Ubisoft-Account/Netzwerk anzuzeigen |
+
+### Demo-Modus (ohne Account ausprobieren)
+
+Zum schnellen Anschauen ohne Ubisoft-Zugangsdaten:
+
+```bash
+R6_DEMO=1 npm run dev
+# beliebigen Nutzernamen suchen -> komplettes Profil mit Beispieldaten
+```
+
+Im Demo-Modus liefert `/api/player` realistische Mock-Daten (aus `lib/demo.ts`)
+inkl. eingebetteter Icons, sodass die gesamte UI auch offline vollständig
+dargestellt wird.
 
 > Der Rangverlauf fragt die Saisons `MIN..MAX` ab. Eine kleinere Spanne =
 > weniger API-Aufrufe = schnellere Antworten. `r6api.js` kennt Saison-*Namen*
