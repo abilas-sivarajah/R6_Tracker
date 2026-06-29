@@ -104,8 +104,11 @@ async function saveTicketsToDisk(t: Tickets): Promise<void> {
   }
 }
 
+// Only the primary key is required to be valid; the "new" key is fetched
+// lazily (and only if an endpoint actually rejects the primary key) to halve
+// the number of login calls and stay under Ubisoft's per-IP login rate limit.
 function isValid(t: Tickets | null, now: number): t is Tickets {
-  return !!t && t.keyExp > now && t.newKeyExp > now;
+  return !!t && t.keyExp > now;
 }
 
 function dataDomeCookie(): string | null {
@@ -223,10 +226,8 @@ async function resolveTickets(now: number): Promise<Tickets> {
     'Basic ' + Buffer.from(`${email}:${password}`, 'utf8').toString('base64');
 
   let first: SessionResponse;
-  let second: SessionResponse;
   try {
-    first = await postSession(basic);
-    second = await postSession(`Ubi_v1 t=${first.ticket}`);
+    first = await postSession(basic); // single login; "new" key is lazy
   } catch (err) {
     // On a rate-limit, start the cooldown so we stop hammering the endpoint.
     if (err instanceof Error && /too many calls/i.test(err.message)) {
@@ -237,21 +238,63 @@ async function resolveTickets(now: number): Promise<Tickets> {
 
   tickets = {
     key: first.ticket!,
-    newKey: second.ticket!,
+    newKey: '',
     sessionId: first.sessionId ?? '',
     keyExp: first.expiration ? Date.parse(first.expiration) : now + 2 * 3600 * 1000,
-    newKeyExp: second.expiration ? Date.parse(second.expiration) : now + 2 * 3600 * 1000,
+    newKeyExp: 0,
   };
   await saveTicketsToDisk(tickets);
   return tickets;
 }
 
-async function ubiGet<T>(url: string, useNew = false): Promise<T> {
+let newKeyInflight: Promise<string> | null = null;
+
+/** Lazily obtain the "new" key (a second session authenticated with the key). */
+function ensureNewKey(): Promise<string> {
+  const now = Date.now();
+  if (tickets && tickets.newKey && tickets.newKeyExp > now) {
+    return Promise.resolve(tickets.newKey);
+  }
+  if (newKeyInflight) return newKeyInflight;
+  newKeyInflight = (async () => {
+    const t = await getTickets();
+    let second: SessionResponse;
+    try {
+      second = await postSession(`Ubi_v1 t=${t.key}`);
+    } catch (err) {
+      if (err instanceof Error && /too many calls/i.test(err.message)) {
+        await setCooldown(Date.now() + COOLDOWN_MS);
+      }
+      throw err;
+    }
+    t.newKey = second.ticket!;
+    t.newKeyExp = second.expiration
+      ? Date.parse(second.expiration)
+      : Date.now() + 2 * 3600 * 1000;
+    tickets = t;
+    await saveTicketsToDisk(t);
+    return t.newKey;
+  })().finally(() => {
+    newKeyInflight = null;
+  });
+  return newKeyInflight;
+}
+
+async function ubiGet<T>(
+  url: string,
+  useNew = false,
+  retried = false,
+): Promise<T> {
   const t = await getTickets();
+  // Prefer the "new" key for useNew endpoints, but fall back to the primary
+  // key when we haven't fetched the new one yet (saves a login).
+  const usingNew = useNew && !!t.newKey && t.newKeyExp > Date.now();
+  const token = usingNew ? t.newKey : t.key;
+
   const res = await fetch(url, {
     headers: {
       ...baseHeaders(),
-      Authorization: `Ubi_v1 t=${useNew ? t.newKey : t.key}`,
+      Authorization: `Ubi_v1 t=${token}`,
       'Ubi-LocaleCode': 'en-us',
       'Ubi-SessionId': t.sessionId,
       Connection: 'keep-alive',
@@ -268,6 +311,12 @@ async function ubiGet<T>(url: string, useNew = false): Promise<T> {
   if (data && typeof data === 'object' && 'httpCode' in data) {
     const d = data as { httpCode: number; message?: string };
     if (d.httpCode === 401) {
+      // If a useNew endpoint rejected the primary key, fetch the "new" key
+      // once and retry before giving up.
+      if (useNew && !usingNew && !retried) {
+        await ensureNewKey();
+        return ubiGet<T>(url, useNew, true);
+      }
       // Ticket no longer valid — drop the cached one so we re-login next time.
       tickets = null;
       await fs.rm(TICKETS_FILE, { force: true }).catch(() => {});
