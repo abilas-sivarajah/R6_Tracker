@@ -224,16 +224,30 @@ export async function getPlayerData(
 
   const id = profile.id;
 
-  // Fetch the independent pieces in parallel.
-  const [progressionRes, statsRes, currentRanksRes] = await Promise.all([
-    client.getProgression(platform, [id]),
-    client.getStats(platform, [id]),
-    client.getRanks(platform, [id]), // default season (-1) = current, all regions/boards
-  ]);
+  // Fetch the independent pieces in parallel. Some r6api.js endpoints are
+  // outdated and may 404; each is best-effort so one failure doesn't sink the
+  // whole profile.
+  const firstOrNull = async <T>(
+    p: Promise<T[]>,
+    label: string,
+  ): Promise<T | undefined> => {
+    try {
+      return (await p)[0];
+    } catch (err) {
+      console.error(
+        `[r6-tracker] ${label} failed (continuing):`,
+        err instanceof Error ? err.message : err,
+      );
+      return undefined;
+    }
+  };
 
-  const progression = progressionRes[0];
-  const stats = statsRes[0];
-  const currentRanks = currentRanksRes[0];
+  const [progression, stats, currentRanks] = await Promise.all([
+    firstOrNull(client.getProgression(platform, [id]), 'getProgression'),
+    firstOrNull(client.getStats(platform, [id]), 'getStats'),
+    // default season (-1) = current, all regions/boards
+    firstOrNull(client.getRanks(platform, [id]), 'getRanks'),
+  ]);
 
   // --- current season: find the player's active region ----------------------
   let ranked: BoardStats | null = null;
