@@ -1,10 +1,4 @@
-import type {
-  BoardStats,
-  PlayerData,
-  RankHistoryPoint,
-  RecentMatch,
-  SeasonRank,
-} from '@/lib/types';
+import type { BoardStats, PlayerData, RecentMatch } from '@/lib/types';
 
 function RankCard({ title, board }: { title: string; board: BoardStats | null }) {
   if (!board) {
@@ -124,107 +118,6 @@ function RecentMatches({ matches }: { matches: RecentMatch[] }) {
   );
 }
 
-function RankHistory({ points }: { points: RankHistoryPoint[] }) {
-  if (points.length === 0) {
-    return (
-      <p className="message info" style={{ margin: 0, textAlign: 'left' }}>
-        Kein Rang-Verlauf gefunden.
-      </p>
-    );
-  }
-  const fmt = (iso: string) => {
-    const d = new Date(iso);
-    return Number.isNaN(d.getTime())
-      ? iso
-      : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  };
-  return (
-    <div className="card table-scroll">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Datum</th>
-            <th>Rang</th>
-            <th>RP</th>
-          </tr>
-        </thead>
-        <tbody>
-          {points.map((p, i) => (
-            <tr key={`${p.date}-${i}`}>
-              <td>{fmt(p.date)}</td>
-              <td>
-                <span className="with-icon">
-                  {p.rankImage ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={p.rankImage} alt={p.rank} />
-                  ) : null}
-                  <span style={p.color ? { color: p.color } : undefined}>{p.rank}</span>
-                </span>
-              </td>
-              <td>{p.rp}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function SeasonHistory({ history }: { history: SeasonRank[] }) {
-  if (history.length === 0) {
-    return (
-      <p className="message info" style={{ margin: 0, textAlign: 'left' }}>
-        Kein Rangverlauf gefunden.
-      </p>
-    );
-  }
-  // Most recent season first.
-  const rows = [...history].reverse();
-  return (
-    <div className="card table-scroll">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Saison</th>
-            <th>Rang</th>
-            <th>MMR</th>
-            <th>Höchster Rang</th>
-            <th>W / L</th>
-            <th>Winrate</th>
-            <th>K/D</th>
-            <th>Region</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.seasonId}>
-              <td>{s.seasonName}</td>
-              <td>
-                <span className="with-icon">
-                  {s.rank.icon ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={s.rank.icon} alt={s.rank.name} />
-                  ) : null}
-                  {s.rank.name}
-                </span>
-              </td>
-              <td>{s.mmr}</td>
-              <td>{s.maxRank.name}</td>
-              <td>
-                <span className="win">{s.wins}</span> /{' '}
-                <span className="loss">{s.losses}</span>
-              </td>
-              <td>{s.winRate}</td>
-              <td>{s.kd}</td>
-              <td>{s.region}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 export default function PlayerProfile({ data }: { data: PlayerData }) {
   return (
     <div>
@@ -298,21 +191,7 @@ export default function PlayerProfile({ data }: { data: PlayerData }) {
         </div>
       ) : null}
 
-      {/* Rank history */}
-      <div className="section">
-        <p className="section-title">
-          {data.rankHistory && data.rankHistory.length > 0
-            ? 'Rang-Verlauf (aktuelle Saison)'
-            : 'Rangverlauf (frühere Ränge)'}
-        </p>
-        {data.rankHistory && data.rankHistory.length > 0 ? (
-          <RankHistory points={data.rankHistory} />
-        ) : (
-          <SeasonHistory history={data.history} />
-        )}
-      </div>
-
-      {/* Match history placeholder */}
+      {/* Recent ranked matches */}
       <div className="section">
         <p className="section-title">Letzte Ranked-Partien</p>
         {data.recentMatches && data.recentMatches.length > 0 ? (

@@ -12,7 +12,6 @@ import type {
   OperatorBrief,
   PlayerData,
   Platform,
-  RankHistoryPoint,
   RecentMatch,
 } from './types';
 
@@ -201,29 +200,6 @@ function parseRecentMatches(seasonal: unknown): RecentMatch[] {
   return out;
 }
 
-/** Collapse the RP timeline into rank-change milestones (most recent first). */
-function parseRankHistory(seasonal: unknown): RankHistoryPoint[] {
-  const data = historyArray(seasonal);
-  const out: RankHistoryPoint[] = [];
-  let lastRank = '';
-  for (const point of data) {
-    const ts = point[0];
-    const meta = point[1]?.metadata ?? {};
-    const rank = meta.rank ?? '';
-    if (!rank || rank === lastRank) continue;
-    lastRank = rank;
-    out.push({
-      date: ts,
-      rank,
-      rankImage: meta.imageUrl ?? '',
-      color: meta.color,
-      rp: point[1]?.value ?? 0,
-    });
-    if (out.length >= 15) break;
-  }
-  return out;
-}
-
 /**
  * Temporary helper: fetch the raw R6Data responses we don't yet map, so their
  * exact shapes can be inspected (avatar id, operators, seasonal history).
@@ -306,7 +282,6 @@ export async function getPlayerDataViaR6Data(
     currentSeasonName: profiles.seasonId > 0 ? `Season ${profiles.seasonId}` : '',
     currentRegion: '',
     history: [],
-    rankHistory: parseRankHistory(seasonal),
     recentMatches: parseRecentMatches(seasonal),
     general: aggregateGeneral(operators),
     topOperators: mapOperators(operators),
