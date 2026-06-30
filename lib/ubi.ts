@@ -353,7 +353,7 @@ export async function findPlayer(
   };
 }
 
-interface RawFullProfile {
+export interface RawFullProfile {
   profile?: {
     board_id?: string;
     rank?: number;
@@ -368,6 +368,17 @@ interface RawFullProfile {
     deaths?: number;
     match_outcomes?: { wins?: number; losses?: number; abandons?: number };
   };
+}
+
+// Shared shape of the "full_profiles" payload — returned both by Ubisoft's
+// endpoint and by R6Data's /stats?type=stats endpoint.
+export interface FullProfilesData {
+  platform_families_full_profiles?: Array<{
+    board_ids_full_profiles?: Array<{
+      board_id?: string;
+      full_profiles?: RawFullProfile[];
+    }>;
+  }>;
 }
 
 function toBoard(fp: RawFullProfile): BoardStats {
@@ -402,23 +413,8 @@ export interface FullProfiles {
   seasonId: number;
 }
 
-export async function getFullProfiles(
-  userId: string,
-  platform: Platform,
-): Promise<FullProfiles> {
-  const family = platform === 'uplay' ? 'pc' : 'console';
-  const url =
-    `${UBISERVICES}/v2/spaces/${XPLAY_SPACE}/title/r6s/skill/full_profiles?` +
-    `profile_ids=${userId}&platform_families=${family}`;
-  const data = await ubiGet<{
-    platform_families_full_profiles?: Array<{
-      board_ids_full_profiles?: Array<{
-        board_id?: string;
-        full_profiles?: RawFullProfile[];
-      }>;
-    }>;
-  }>(url, true);
-
+/** Pure parser for a full_profiles payload (shared with the R6Data provider). */
+export function parseFullProfiles(data: FullProfilesData): FullProfiles {
   const boards =
     data.platform_families_full_profiles?.[0]?.board_ids_full_profiles ?? [];
   let ranked: BoardStats | null = null;
@@ -432,6 +428,18 @@ export async function getFullProfiles(
     else if (b.board_id === 'casual') casual = toBoard(fp);
   }
   return { ranked, casual, seasonId };
+}
+
+export async function getFullProfiles(
+  userId: string,
+  platform: Platform,
+): Promise<FullProfiles> {
+  const family = platform === 'uplay' ? 'pc' : 'console';
+  const url =
+    `${UBISERVICES}/v2/spaces/${XPLAY_SPACE}/title/r6s/skill/full_profiles?` +
+    `profile_ids=${userId}&platform_families=${family}`;
+  const data = await ubiGet<FullProfilesData>(url, true);
+  return parseFullProfiles(data);
 }
 
 export async function getLevel(

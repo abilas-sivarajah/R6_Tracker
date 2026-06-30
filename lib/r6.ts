@@ -1,6 +1,7 @@
 // Builds the normalised PlayerData we show in the UI, using the current
 // Ubisoft endpoints in ./ubi (the old r6api.js routes are dead).
 
+import { getPlayerDataViaR6Data, hasR6DataKey } from './r6data';
 import { findPlayer, getFullProfiles, getLevel } from './ubi';
 import type { PlayerData, Platform } from './types';
 
@@ -13,6 +14,12 @@ export async function getPlayerData(
   platform: Platform,
   username: string,
 ): Promise<PlayerData | null> {
+  // Prefer R6Data when a key is configured — it avoids the Ubisoft login
+  // (DataDome / 2FA / per-IP rate limit) entirely.
+  if (hasR6DataKey()) {
+    return getPlayerDataViaR6Data(platform, username);
+  }
+
   const profile = await findPlayer(platform, username);
   if (!profile) return null;
 
