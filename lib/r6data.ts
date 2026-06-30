@@ -302,6 +302,20 @@ export async function getPlayerDataViaR6Data(
       ? currentSeason - profiles.seasonId
       : 0;
 
+  // Make the current ranked rank authoritative: use R6Data's own rank name +
+  // image from the latest seasonalStats point. This stays correct across rank
+  // system changes (e.g. Ranked 3.0 / v7) without hardcoding the rank table.
+  const latest = historyArray(seasonal)[0];
+  const latestMeta = latest?.[1]?.metadata;
+  if (ranked && latestMeta?.rank) {
+    ranked.current = {
+      ...ranked.current,
+      name: latestMeta.rank,
+      mmr: latest[1]?.value ?? ranked.current.mmr,
+      icon: latestMeta.imageUrl || ranked.current.icon,
+    };
+  }
+
   return {
     id: username,
     username,
