@@ -76,6 +76,31 @@ function pickAvatar(account: unknown, username: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
+/**
+ * Temporary helper: fetch the raw R6Data responses we don't yet map, so their
+ * exact shapes can be inspected (avatar id, operators, seasonal history).
+ */
+export async function getR6DataRawDebug(
+  platform: Platform,
+  username: string,
+): Promise<Record<string, unknown>> {
+  const family = platform === 'uplay' ? 'pc' : 'console';
+  const grab = async (params: Record<string, string>) => {
+    try {
+      return await r6dataGet<unknown>(params);
+    } catch (err) {
+      return { __error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+  const [accountInfo, operatorStats, seasonalStats, stats] = await Promise.all([
+    grab({ type: 'accountInfo', nameOnPlatform: username, platformType: platform }),
+    grab({ type: 'operatorStats', nameOnPlatform: username, platformType: platform, modes: 'ranked' }),
+    grab({ type: 'seasonalStats', nameOnPlatform: username, platformType: platform }),
+    grab({ type: 'stats', nameOnPlatform: username, platformType: platform, platform_families: family }),
+  ]);
+  return { accountInfo, operatorStats, seasonalStats, stats };
+}
+
 export async function getPlayerDataViaR6Data(
   platform: Platform,
   username: string,
@@ -89,7 +114,8 @@ export async function getPlayerDataViaR6Data(
     platformType: platform,
     platform_families: family,
   });
-  if (stats === null) return null; // player not found
+  // No profile structure => player not found.
+  if (!stats || !stats.platform_families_full_profiles) return null;
 
   const profiles = parseFullProfiles(stats);
 
