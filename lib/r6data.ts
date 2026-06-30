@@ -5,6 +5,7 @@
 //
 // Get a free key at https://r6data.com and set R6DATA_API_KEY in .env.local.
 
+import { OPERATOR_ICONS } from './operatorIcons';
 import { parseFullProfiles, type FullProfilesData } from './ubi';
 import type {
   BoardStats,
@@ -66,6 +67,19 @@ function pickLevel(account: unknown): { level: number; xp: number } {
   };
 }
 
+/** Defensively read a ban flag from R6Data's isBanned response. */
+function pickBanned(res: unknown): boolean {
+  if (!res || typeof res !== 'object') return false;
+  const r = res as Record<string, unknown>;
+  for (const k of ['isBanned', 'banned', 'is_banned']) {
+    if (typeof r[k] === 'boolean') return r[k] as boolean;
+  }
+  // Some APIs return a list of bans.
+  const bans = (r.bans ?? r.sanctions) as unknown;
+  if (Array.isArray(bans)) return bans.length > 0;
+  return false;
+}
+
 function pickAvatar(account: unknown, username: string): string {
   const a = (account ?? {}) as Record<string, unknown>;
   // R6Data returns a ready-to-use avatar URL.
@@ -122,10 +136,20 @@ interface RawOperator {
   timePlayedMs: number;
 }
 
+function normalizeOpName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/ø/g, 'o')
+    .replace(/ł/g, 'l')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
 function mapOperators(ops: RawOperator[]): OperatorBrief[] {
   return ops.slice(0, 8).map((o) => ({
     name: o.operator.trim(),
-    icon: operatorIcon(o.operator, o.side),
+    icon: OPERATOR_ICONS[normalizeOpName(o.operator)] ?? operatorIcon(o.operator, o.side),
     kills: o.kills,
     deaths: o.deaths,
     kd: o.kd,
@@ -258,17 +282,25 @@ export async function getPlayerDataViaR6Data(
   };
 
   // Fetch the remaining pieces in parallel (all best-effort).
-  const [account, operatorsRes, seasonal] = await Promise.all([
+  const [account, operatorsRes, seasonal, banRes] = await Promise.all([
     grab<unknown>({ type: 'accountInfo', nameOnPlatform: username, platformType: platform }, 'accountInfo'),
     grab<{ operators?: RawOperator[] }>(
       { type: 'operatorStats', nameOnPlatform: username, platformType: platform, modes: 'ranked' },
       'operatorStats',
     ),
     grab<unknown>({ type: 'seasonalStats', nameOnPlatform: username, platformType: platform }, 'seasonalStats'),
+    grab<unknown>({ type: 'isBanned', nameOnPlatform: username, platformType: platform }, 'isBanned'),
   ]);
 
   const { level, xp } = pickLevel(account ?? {});
   const operators = operatorsRes?.operators ?? [];
+
+  // Inactivity: how many seasons behind the current one is the player's data.
+  const currentSeason = Number(process.env.R6_CURRENT_SEASON ?? 42);
+  const inactiveSeasons =
+    profiles.seasonId > 0 && profiles.seasonId < currentSeason
+      ? currentSeason - profiles.seasonId
+      : 0;
 
   return {
     id: username,
@@ -281,6 +313,8 @@ export async function getPlayerDataViaR6Data(
     casual,
     currentSeasonName: profiles.seasonId > 0 ? `Season ${profiles.seasonId}` : '',
     currentRegion: '',
+    banned: pickBanned(banRes),
+    inactiveSeasons,
     history: [],
     recentMatches: parseRecentMatches(seasonal),
     general: aggregateGeneral(operators),

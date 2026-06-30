@@ -203,6 +203,20 @@ a {
   margin-left: 8px;
 }
 
+.badge.badge-ban {
+  background: rgba(240, 83, 63, 0.15);
+  border-color: rgba(240, 83, 63, 0.5);
+  color: #ff9b8d;
+  font-weight: 700;
+}
+
+.badge.badge-warn {
+  background: rgba(245, 166, 35, 0.12);
+  border-color: rgba(245, 166, 35, 0.4);
+  color: var(--accent);
+  font-size: 0.75rem;
+}
+
 /* --- rank card --- */
 .rank-card {
   display: flex;

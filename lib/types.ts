@@ -96,6 +96,8 @@ export interface PlayerData {
   casual: BoardStats | null;
   currentSeasonName: string;
   currentRegion: string;
+  banned?: boolean;
+  inactiveSeasons?: number; // how many seasons behind the current one (0 = active)
   history: SeasonRank[];
   rankHistory?: RankHistoryPoint[];
   recentMatches?: RecentMatch[];

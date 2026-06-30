@@ -134,10 +134,17 @@ export default function PlayerProfile({ data }: { data: PlayerData }) {
             {data.currentRegion ? (
               <span className="badge">{data.currentRegion}</span>
             ) : null}
+            {data.banned ? <span className="badge badge-ban">GESPERRT</span> : null}
           </h2>
           <p className="meta">
             Level {data.level}
             {data.currentSeasonName ? ` · ${data.currentSeasonName}` : ''}
+            {data.inactiveSeasons && data.inactiveSeasons > 0 ? (
+              <span className="badge badge-warn">
+                ⚠️ zuletzt aktiv · inaktiv seit {data.inactiveSeasons}{' '}
+                {data.inactiveSeasons === 1 ? 'Saison' : 'Saisons'}
+              </span>
+            ) : null}
           </p>
         </div>
       </div>
