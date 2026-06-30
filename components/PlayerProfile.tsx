@@ -2,6 +2,7 @@ import type {
   BoardStats,
   PlayerData,
   RankHistoryPoint,
+  RecentMatch,
   SeasonRank,
 } from '@/lib/types';
 
@@ -67,6 +68,58 @@ function Tile({ value, label }: { value: string | number; label: string }) {
     <div className="card tile">
       <div className="value">{value}</div>
       <div className="label">{label}</div>
+    </div>
+  );
+}
+
+function RecentMatches({ matches }: { matches: RecentMatch[] }) {
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? iso
+      : d.toLocaleString('de-DE', {
+          day: '2-digit',
+          month: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+  };
+  return (
+    <div className="card table-scroll">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Ergebnis</th>
+            <th>RP</th>
+            <th>Gesamt-RP</th>
+            <th>Rang</th>
+          </tr>
+        </thead>
+        <tbody>
+          {matches.map((m, i) => (
+            <tr key={`${m.date}-${i}`}>
+              <td>{fmt(m.date)}</td>
+              <td className={m.result === 'win' ? 'win' : 'loss'}>
+                {m.result === 'win' ? 'Sieg' : 'Niederlage'}
+              </td>
+              <td className={m.rpChange >= 0 ? 'win' : 'loss'}>
+                {m.rpChange > 0 ? `+${m.rpChange}` : m.rpChange}
+              </td>
+              <td>{m.rp}</td>
+              <td>
+                <span className="with-icon">
+                  {m.rankImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={m.rankImage} alt={m.rank} />
+                  ) : null}
+                  {m.rank}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -261,14 +314,16 @@ export default function PlayerProfile({ data }: { data: PlayerData }) {
 
       {/* Match history placeholder */}
       <div className="section">
-        <p className="section-title">Match-Verlauf</p>
-        <div className="card">
-          <p className="message info" style={{ margin: 0, textAlign: 'left' }}>
-            Eine vollständige Match-für-Match-Historie wird von Ubisofts
-            (inoffizieller) API nicht bereitgestellt. Die Datenstruktur ist
-            vorbereitet, um später eine eigene Match-Quelle anzubinden.
-          </p>
-        </div>
+        <p className="section-title">Letzte Ranked-Partien</p>
+        {data.recentMatches && data.recentMatches.length > 0 ? (
+          <RecentMatches matches={data.recentMatches} />
+        ) : (
+          <div className="card">
+            <p className="message info" style={{ margin: 0, textAlign: 'left' }}>
+              Keine Ranked-Partien in dieser Saison gefunden.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

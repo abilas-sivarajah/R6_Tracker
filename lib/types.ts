@@ -76,6 +76,15 @@ export interface RankHistoryPoint {
   rp: number;
 }
 
+export interface RecentMatch {
+  date: string; // ISO timestamp
+  result: 'win' | 'loss' | 'neutral';
+  rpChange: number;
+  rp: number;
+  rank: string;
+  rankImage: string;
+}
+
 export interface PlayerData {
   id: string;
   username: string;
@@ -89,6 +98,7 @@ export interface PlayerData {
   currentRegion: string;
   history: SeasonRank[];
   rankHistory?: RankHistoryPoint[];
+  recentMatches?: RecentMatch[];
   general: GeneralStats | null;
   topOperators: OperatorBrief[];
   // Match-by-match history is not exposed by Ubisoft's unofficial API.

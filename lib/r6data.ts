@@ -13,6 +13,7 @@ import type {
   PlayerData,
   Platform,
   RankHistoryPoint,
+  RecentMatch,
 } from './types';
 
 const BASE = 'https://api.r6data.com/api';
@@ -167,11 +168,42 @@ interface RawHistoryPoint {
   1: { value: number; metadata?: { rank?: string; color?: string; imageUrl?: string } };
 }
 
-/** Collapse the RP timeline into rank-change milestones (most recent first). */
-function parseRankHistory(seasonal: unknown): RankHistoryPoint[] {
+function historyArray(seasonal: unknown): RawHistoryPoint[] {
   const data = (seasonal as { data?: { history?: { data?: RawHistoryPoint[] } } })
     ?.data?.history?.data;
-  if (!Array.isArray(data)) return [];
+  return Array.isArray(data) ? data : [];
+}
+
+/**
+ * Derive recent ranked matches from the RP timeline: each consecutive pair of
+ * points is one match — RP up = win, RP down = loss. (R6Data has no per-match
+ * endpoint; this mirrors how trackers show "recent matches".)
+ */
+function parseRecentMatches(seasonal: unknown): RecentMatch[] {
+  const data = historyArray(seasonal); // newest first
+  const out: RecentMatch[] = [];
+  for (let i = 0; i < data.length - 1 && out.length < 20; i++) {
+    const cur = data[i];
+    const prev = data[i + 1];
+    const rp = cur[1]?.value ?? 0;
+    const rpChange = rp - (prev[1]?.value ?? 0);
+    if (rpChange === 0) continue;
+    const meta = cur[1]?.metadata ?? {};
+    out.push({
+      date: cur[0],
+      result: rpChange > 0 ? 'win' : 'loss',
+      rpChange,
+      rp,
+      rank: meta.rank ?? '',
+      rankImage: meta.imageUrl ?? '',
+    });
+  }
+  return out;
+}
+
+/** Collapse the RP timeline into rank-change milestones (most recent first). */
+function parseRankHistory(seasonal: unknown): RankHistoryPoint[] {
+  const data = historyArray(seasonal);
   const out: RankHistoryPoint[] = [];
   let lastRank = '';
   for (const point of data) {
@@ -275,6 +307,7 @@ export async function getPlayerDataViaR6Data(
     currentRegion: '',
     history: [],
     rankHistory: parseRankHistory(seasonal),
+    recentMatches: parseRecentMatches(seasonal),
     general: aggregateGeneral(operators),
     topOperators: mapOperators(operators),
     matches: [],
