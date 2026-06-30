@@ -68,6 +68,14 @@ export interface GeneralStats {
   playtimeHours: number;
 }
 
+export interface RankHistoryPoint {
+  date: string; // ISO timestamp
+  rank: string;
+  rankImage: string;
+  color?: string;
+  rp: number;
+}
+
 export interface PlayerData {
   id: string;
   username: string;
@@ -80,6 +88,7 @@ export interface PlayerData {
   currentSeasonName: string;
   currentRegion: string;
   history: SeasonRank[];
+  rankHistory?: RankHistoryPoint[];
   general: GeneralStats | null;
   topOperators: OperatorBrief[];
   // Match-by-match history is not exposed by Ubisoft's unofficial API.

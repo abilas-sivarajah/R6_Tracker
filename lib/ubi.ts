@@ -354,6 +354,7 @@ export async function findPlayer(
 }
 
 export interface RawFullProfile {
+  season_id?: number;
   profile?: {
     board_id?: string;
     rank?: number;
@@ -423,7 +424,7 @@ export function parseFullProfiles(data: FullProfilesData): FullProfiles {
   for (const b of boards) {
     const fp = b.full_profiles?.[0];
     if (!fp) continue;
-    seasonId = fp.profile?.season_id ?? seasonId;
+    seasonId = fp.season_id ?? fp.profile?.season_id ?? seasonId;
     if (b.board_id === 'ranked') ranked = toBoard(fp);
     else if (b.board_id === 'casual') casual = toBoard(fp);
   }

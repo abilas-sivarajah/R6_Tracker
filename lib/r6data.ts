@@ -6,7 +6,14 @@
 // Get a free key at https://r6data.com and set R6DATA_API_KEY in .env.local.
 
 import { parseFullProfiles, type FullProfilesData } from './ubi';
-import type { PlayerData, Platform } from './types';
+import type {
+  BoardStats,
+  GeneralStats,
+  OperatorBrief,
+  PlayerData,
+  Platform,
+  RankHistoryPoint,
+} from './types';
 
 const BASE = 'https://api.r6data.com/api';
 
@@ -61,19 +68,128 @@ function pickLevel(account: unknown): { level: number; xp: number } {
 
 function pickAvatar(account: unknown, username: string): string {
   const a = (account ?? {}) as Record<string, unknown>;
-  const uid =
-    (a.profileId as string) ??
-    (a.userId as string) ??
-    (a.id as string) ??
-    '';
+  // R6Data returns a ready-to-use avatar URL.
+  const pic = a.profilePicture as string | undefined;
+  if (pic) return pic.replace('_146_146', '_256_256');
+  const uid = (a.profileId as string) ?? (a.userId as string) ?? '';
   if (uid) return `https://ubisoft-avatars.akamaized.net/${uid}/default_256_256.png`;
-  // Fallback: a simple generated avatar so the UI still looks complete.
   const letter = (username[0] ?? 'R').toUpperCase();
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="76" height="76">` +
     `<rect width="76" height="76" rx="12" fill="#4d8bf0"/>` +
     `<text x="38" y="50" font-family="Arial" font-size="34" font-weight="bold" fill="#fff" text-anchor="middle">${letter}</text></svg>`;
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+/** R6Data hosts rank tier images, e.g. .../bronze-5.webp. */
+function rankImageUrl(name: string): string | null {
+  if (!name || name === 'Unranked') return null;
+  const slug = name.toLowerCase().replace(/\s+/g, '-');
+  return `https://r6data.com/assets/img/r6_ranks_img/${slug}.webp`;
+}
+
+/** Swap the generated SVG rank icons for R6Data's real tier images. */
+function withRealRankIcons(board: BoardStats | null): BoardStats | null {
+  if (!board) return board;
+  board.current.icon = rankImageUrl(board.current.name) ?? board.current.icon;
+  board.max.icon = rankImageUrl(board.max.name) ?? board.max.icon;
+  return board;
+}
+
+/** Small side-coloured operator badge (no external icon hosting needed). */
+function operatorIcon(name: string, side: string): string {
+  const color = side === 'Attacker' ? '#e8732a' : '#3b82f6';
+  const label = name.trim().slice(0, 3);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">` +
+    `<rect width="48" height="48" rx="8" fill="${color}"/>` +
+    `<text x="24" y="30" font-family="Arial" font-size="15" font-weight="bold" fill="#0b0e14" text-anchor="middle">${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+interface RawOperator {
+  operator: string;
+  side: string;
+  kd: number;
+  winPercent: number;
+  wins: number;
+  losses: number;
+  kills: number;
+  deaths: number;
+  headshots: number;
+  roundsPlayed: number;
+  matchesPlayed: number;
+  timePlayedMs: number;
+}
+
+function mapOperators(ops: RawOperator[]): OperatorBrief[] {
+  return ops.slice(0, 8).map((o) => ({
+    name: o.operator.trim(),
+    icon: operatorIcon(o.operator, o.side),
+    kills: o.kills,
+    deaths: o.deaths,
+    kd: o.kd,
+    winRate: `${o.winPercent}%`,
+    matches: o.matchesPlayed,
+    playtime: Math.round((o.timePlayedMs / 3_600_000) * 10) / 10,
+  }));
+}
+
+/** Aggregate per-operator (ranked) stats into a career overview. */
+function aggregateGeneral(ops: RawOperator[]): GeneralStats | null {
+  if (ops.length === 0) return null;
+  let kills = 0, deaths = 0, headshots = 0, wins = 0, losses = 0, rounds = 0, ms = 0;
+  for (const o of ops) {
+    kills += o.kills;
+    deaths += o.deaths;
+    headshots += o.headshots;
+    wins += o.wins;
+    losses += o.losses;
+    rounds += o.roundsPlayed;
+    ms += o.timePlayedMs;
+  }
+  return {
+    kills,
+    deaths,
+    kd: deaths > 0 ? Math.round((kills / deaths) * 100) / 100 : kills,
+    wins,
+    losses,
+    winRate: wins + losses > 0 ? `${((wins / (wins + losses)) * 100).toFixed(1)}%` : '0%',
+    matches: rounds,
+    headshots,
+    headshotPercent: kills > 0 ? `${((headshots / kills) * 100).toFixed(1)}%` : '0%',
+    playtimeHours: Math.round((ms / 3_600_000) * 10) / 10,
+  };
+}
+
+interface RawHistoryPoint {
+  0: string; // timestamp
+  1: { value: number; metadata?: { rank?: string; color?: string; imageUrl?: string } };
+}
+
+/** Collapse the RP timeline into rank-change milestones (most recent first). */
+function parseRankHistory(seasonal: unknown): RankHistoryPoint[] {
+  const data = (seasonal as { data?: { history?: { data?: RawHistoryPoint[] } } })
+    ?.data?.history?.data;
+  if (!Array.isArray(data)) return [];
+  const out: RankHistoryPoint[] = [];
+  let lastRank = '';
+  for (const point of data) {
+    const ts = point[0];
+    const meta = point[1]?.metadata ?? {};
+    const rank = meta.rank ?? '';
+    if (!rank || rank === lastRank) continue;
+    lastRank = rank;
+    out.push({
+      date: ts,
+      rank,
+      rankImage: meta.imageUrl ?? '',
+      color: meta.color,
+      rp: point[1]?.value ?? 0,
+    });
+    if (out.length >= 15) break;
+  }
+  return out;
 }
 
 /**
@@ -118,42 +234,49 @@ export async function getPlayerDataViaR6Data(
   if (!stats || !stats.platform_families_full_profiles) return null;
 
   const profiles = parseFullProfiles(stats);
+  const ranked = withRealRankIcons(profiles.ranked);
+  const casual = withRealRankIcons(profiles.casual);
 
-  // Account info (level/xp) — best-effort.
-  let level = 0;
-  let xp = 0;
-  let avatar = pickAvatar(null, username);
-  try {
-    const account = await r6dataGet<unknown>({
-      type: 'accountInfo',
-      nameOnPlatform: username,
-      platformType: platform,
-    });
-    const lv = pickLevel(account);
-    level = lv.level;
-    xp = lv.xp;
-    avatar = pickAvatar(account, username);
-  } catch (err) {
-    console.error(
-      '[r6-tracker] R6Data accountInfo failed (continuing):',
-      err instanceof Error ? err.message : err,
-    );
-  }
+  const grab = async <T>(params: Record<string, string>, label: string): Promise<T | null> => {
+    try {
+      return await r6dataGet<T>(params);
+    } catch (err) {
+      console.error(
+        `[r6-tracker] R6Data ${label} failed (continuing):`,
+        err instanceof Error ? err.message : err,
+      );
+      return null;
+    }
+  };
+
+  // Fetch the remaining pieces in parallel (all best-effort).
+  const [account, operatorsRes, seasonal] = await Promise.all([
+    grab<unknown>({ type: 'accountInfo', nameOnPlatform: username, platformType: platform }, 'accountInfo'),
+    grab<{ operators?: RawOperator[] }>(
+      { type: 'operatorStats', nameOnPlatform: username, platformType: platform, modes: 'ranked' },
+      'operatorStats',
+    ),
+    grab<unknown>({ type: 'seasonalStats', nameOnPlatform: username, platformType: platform }, 'seasonalStats'),
+  ]);
+
+  const { level, xp } = pickLevel(account ?? {});
+  const operators = operatorsRes?.operators ?? [];
 
   return {
     id: username,
     username,
     platform,
-    avatar,
+    avatar: pickAvatar(account, username),
     level,
     xp,
-    ranked: profiles.ranked,
-    casual: profiles.casual,
+    ranked,
+    casual,
     currentSeasonName: profiles.seasonId > 0 ? `Season ${profiles.seasonId}` : '',
     currentRegion: '',
     history: [],
-    general: null,
-    topOperators: [],
+    rankHistory: parseRankHistory(seasonal),
+    general: aggregateGeneral(operators),
+    topOperators: mapOperators(operators),
     matches: [],
   };
 }

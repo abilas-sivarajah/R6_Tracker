@@ -1,4 +1,9 @@
-import type { BoardStats, PlayerData, SeasonRank } from '@/lib/types';
+import type {
+  BoardStats,
+  PlayerData,
+  RankHistoryPoint,
+  SeasonRank,
+} from '@/lib/types';
 
 function RankCard({ title, board }: { title: string; board: BoardStats | null }) {
   if (!board) {
@@ -62,6 +67,52 @@ function Tile({ value, label }: { value: string | number; label: string }) {
     <div className="card tile">
       <div className="value">{value}</div>
       <div className="label">{label}</div>
+    </div>
+  );
+}
+
+function RankHistory({ points }: { points: RankHistoryPoint[] }) {
+  if (points.length === 0) {
+    return (
+      <p className="message info" style={{ margin: 0, textAlign: 'left' }}>
+        Kein Rang-Verlauf gefunden.
+      </p>
+    );
+  }
+  const fmt = (iso: string) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime())
+      ? iso
+      : d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  };
+  return (
+    <div className="card table-scroll">
+      <table className="table">
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Rang</th>
+            <th>RP</th>
+          </tr>
+        </thead>
+        <tbody>
+          {points.map((p, i) => (
+            <tr key={`${p.date}-${i}`}>
+              <td>{fmt(p.date)}</td>
+              <td>
+                <span className="with-icon">
+                  {p.rankImage ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={p.rankImage} alt={p.rank} />
+                  ) : null}
+                  <span style={p.color ? { color: p.color } : undefined}>{p.rank}</span>
+                </span>
+              </td>
+              <td>{p.rp}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -157,11 +208,11 @@ export default function PlayerProfile({ data }: { data: PlayerData }) {
       {/* General stats */}
       {data.general ? (
         <div className="section">
-          <p className="section-title">Allgemeine Statistiken (PvP)</p>
+          <p className="section-title">Allgemeine Statistiken (Ranked, gesamt)</p>
           <div className="grid cols-3">
             <Tile value={data.general.kd} label="K/D" />
-            <Tile value={data.general.winRate} label="Winrate" />
-            <Tile value={data.general.matches} label="Spiele" />
+            <Tile value={data.general.winRate} label="Runden-Winrate" />
+            <Tile value={data.general.matches} label="Runden" />
             <Tile value={data.general.kills} label="Kills" />
             <Tile value={data.general.headshotPercent} label="Headshot %" />
             <Tile value={`${data.general.playtimeHours} h`} label="Spielzeit" />
@@ -194,10 +245,18 @@ export default function PlayerProfile({ data }: { data: PlayerData }) {
         </div>
       ) : null}
 
-      {/* Season history */}
+      {/* Rank history */}
       <div className="section">
-        <p className="section-title">Rangverlauf (frühere Ränge)</p>
-        <SeasonHistory history={data.history} />
+        <p className="section-title">
+          {data.rankHistory && data.rankHistory.length > 0
+            ? 'Rang-Verlauf (aktuelle Saison)'
+            : 'Rangverlauf (frühere Ränge)'}
+        </p>
+        {data.rankHistory && data.rankHistory.length > 0 ? (
+          <RankHistory points={data.rankHistory} />
+        ) : (
+          <SeasonHistory history={data.history} />
+        )}
       </div>
 
       {/* Match history placeholder */}
